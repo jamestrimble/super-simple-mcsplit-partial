@@ -3,12 +3,14 @@
 
 extern std::atomic<bool> abort_due_to_timeout;
 
-enum class Heuristic {
+enum class Heuristic
+{
     min_max,
     min_product
 };
 
-struct Params {
+struct Params
+{
     bool quiet;
     bool verbose;
     bool mcsplit_down;
@@ -16,7 +18,8 @@ struct Params {
     std::chrono::time_point<std::chrono::steady_clock> start_time;
 };
 
-struct Assignment {
+struct Assignment
+{
     int v;
     int w;
 
@@ -26,7 +29,14 @@ struct Assignment {
     }
 };
 
-struct McsStats {
+struct Edge
+{
+    int v;
+    int w;
+};
+
+struct McsStats
+{
     unsigned long long nodes = 0;
     long long time_of_last_incumbent_update = 0;
 };

@@ -1,6 +1,7 @@
 #include "graph.hh"
 #include "solve_mcs.hh"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -131,7 +132,45 @@ bool check_sol(const Graph & g0, const Graph & g1 , const vector<Assignment> & s
     return true;
 }
 
-int main(int argc, char** argv) {
+vector<Edge> get_edges(const Graph & g)
+{
+    vector<Edge> edges;
+    for (int i=0; i<g.n; i++)
+        for (int j=0; j<i; j++)
+            if (g.adjmat[i][j])
+                edges.push_back({i, j});
+
+    auto deg = calculate_degrees(g);
+
+    std::sort(edges.begin(), edges.end(), [&deg](auto e0, auto e1){
+                return deg[e0.v] + deg[e0.w] > deg[e1.v] + deg[e1.w];
+            });
+
+    return edges;
+}
+
+Graph make_linegraph(const Graph & g, const vector<Edge> & edges)
+{
+    Graph linegraph(edges.size());
+    for (unsigned i=0; i<edges.size(); i++) {
+        Edge ei = edges[i];
+        for (unsigned j=0; j<edges.size(); j++) {
+            Edge ej = edges[j];
+            if (i != j && (ei.v == ej.v ||
+                           ei.v == ej.w ||
+                           ei.w == ej.v ||
+                           ei.w == ej.w)) {
+                linegraph.adjmat[i][j] = 1;
+                linegraph.adjmat[j][i] = 1;
+            }
+        }
+    }
+
+    return linegraph;
+}
+
+int main(int argc, char** argv)
+{
     argp_parse(&argp, argc, argv, 0, 0, 0);
 
     char format = arguments.dimacs ? 'D' : arguments.lad ? 'L' : 'B';
@@ -173,7 +212,16 @@ int main(int argc, char** argv) {
         start
     };
 
-    auto result = solve_mcs(g0, g1, params);
+    //////////////////////////////////////////
+    // TODO: move this stuff into the solver file
+    auto edges0 = get_edges(g0);
+    auto edges1 = get_edges(g1);
+
+    auto linegraph0 = make_linegraph(g0, edges0);
+    auto linegraph1 = make_linegraph(g1, edges1);
+    //////////////////////////////////////////
+
+    auto result = solve_mcs(linegraph0, linegraph1, params);
     auto solution = result.first;
     auto stats = result.second;
 
@@ -190,14 +238,15 @@ int main(int argc, char** argv) {
         timeout_thread.join();
     }
 
-    if (!check_sol(g0, g1, solution))
-        fail("*** Error: Invalid solution\n");
+//    if (!check_sol(g0, g1, solution))
+//        fail("*** Error: Invalid solution\n");
+    printf("TODO: write a solution checker\n");
 
     cout << "Solution size " << solution.size() << std::endl;
-    for (int i=0; i<g0.n; i++)
-        for (unsigned int j=0; j<solution.size(); j++)
-            if (solution[j].v == i)
-                cout << "(" << solution[j].v << " -> " << solution[j].w << ") ";
+//    for (int i=0; i<g0.n; i++)
+//        for (unsigned int j=0; j<solution.size(); j++)
+//            if (solution[j].v == i)
+//                cout << "(" << solution[j].v << " -> " << solution[j].w << ") ";
     cout << std::endl;
 
     cout << "Nodes:                              " << stats.nodes << endl;
