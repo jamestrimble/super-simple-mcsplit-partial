@@ -221,7 +221,8 @@ int main(int argc, char** argv)
     auto linegraph1 = make_linegraph(g1, edges1);
     //////////////////////////////////////////
 
-    auto result = solve_mcs(linegraph0, linegraph1, params);
+    auto result = solve_mcs(linegraph0, linegraph1, edges0, edges1,
+            g0, g1, params);
     auto solution = result.first;
     auto stats = result.second;
 

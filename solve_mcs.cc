@@ -32,8 +32,12 @@ namespace {
 
     class MCS
     {
-        const Graph & g0;
-        const Graph & g1;
+        const Graph & linegraph0;
+        const Graph & linegraph1;
+        const std::vector<Edge> edges0;
+        const std::vector<Edge> edges1;
+        const Graph & originalgraph0;
+        const Graph & originalgraph1;
         const Params params;
         McsStats stats;
         vector<Assignment> incumbent;
@@ -115,8 +119,8 @@ namespace {
                 int r = old_bd.r;
                 // After these two partitions, left_len and right_len are the lengths of the
                 // arrays of vertices with edges from v or w
-                int left_len = partition(new_ds.left, l, old_bd.left_len, g0.adjmat[v]);
-                int right_len = partition(new_ds.right, r, old_bd.right_len, g1.adjmat[w]);
+                int left_len = partition(new_ds.left, l, old_bd.left_len, linegraph0.adjmat[v]);
+                int right_len = partition(new_ds.right, r, old_bd.right_len, linegraph1.adjmat[w]);
                 int left_len_noedge = old_bd.left_len - left_len;
                 int right_len_noedge = old_bd.right_len - right_len;
                 if (left_len_noedge && right_len_noedge)
@@ -159,10 +163,45 @@ namespace {
             ReachedGoal
         };
 
+        auto update_vtx_counts(
+                std::vector<int> & vtx_counts0,
+                std::vector<int> & vtx_counts1,
+                int v,
+                int w) -> bool
+        {
+            Edge e0 = edges0[v];
+            // new_count0 is the number of new non-zeroes in vtx_counts0
+            int new_count0 = ((0==vtx_counts0[e0.v]) + (0==vtx_counts0[e0.w]));
+            ++vtx_counts0[e0.v];
+            ++vtx_counts0[e0.w];
+            Edge e1 = edges1[w];
+            // new_count1 is the number of new non-zeroes in vtx_counts1
+            int new_count1 = ((0==vtx_counts1[e1.v]) + (0==vtx_counts1[e1.w]));
+            ++vtx_counts1[e1.v];
+            ++vtx_counts1[e1.w];
+            return new_count0 == new_count1;
+        }
+
+        auto downdate_vtx_counts(
+                std::vector<int> & vtx_counts0,
+                std::vector<int> & vtx_counts1,
+                int v,
+                int w) -> void
+        {
+            Edge e0 = edges0[v];
+            --vtx_counts0[e0.v];
+            --vtx_counts0[e0.w];
+            Edge e1 = edges1[w];
+            --vtx_counts1[e1.v];
+            --vtx_counts1[e1.w];
+        }
+
         auto search(
                 vector<Assignment> & current,
                 DomainStore & domain_store,
-                unsigned int matching_size_goal) -> Search
+                unsigned int matching_size_goal,
+                std::vector<int> & vtx_counts0,
+                std::vector<int> & vtx_counts1) -> Search
         {
             if (abort_due_to_timeout)
                 return Search::Aborted;
@@ -198,13 +237,19 @@ namespace {
 
             for (auto it=right_label_class_begin; it!=right_label_class_end; ++it) {
                 int w = *it;
-                current.push_back({v, w});
-                std::swap(*it, right_label_class_last_elem); // swap w to the end of its label class
 
-                auto new_domain_store = refined_domains(domain_store, v, w);
-                Search search_result = search(current, new_domain_store, matching_size_goal);
-                current.pop_back();
-                std::swap(*it, right_label_class_last_elem); // swap w back to its correct place in the sorted label class
+                Search search_result = Search::Done;
+                if (update_vtx_counts(vtx_counts0, vtx_counts1, v, w)) {
+                    std::swap(*it, right_label_class_last_elem); // swap w to the end of its label class
+                    current.push_back({v, w});
+                    auto new_domain_store = refined_domains(domain_store, v, w);
+                    search_result = search(current, new_domain_store, matching_size_goal,
+                            vtx_counts0, vtx_counts1);
+                    current.pop_back();
+                    std::swap(*it, right_label_class_last_elem); // swap w back to its correct place in the sorted label class
+                }
+                downdate_vtx_counts(vtx_counts0, vtx_counts1, v, w);
+
                 switch (search_result)
                 {
                 case Search::Aborted:     return Search::Aborted;
@@ -217,38 +262,57 @@ namespace {
             bd.right_len++;
             if (bd.left_len == 0)
                 remove_bidomain(domain_store.domains, bd_idx);
-            return search(current, domain_store, matching_size_goal);
+            return search(current, domain_store, matching_size_goal, vtx_counts0, vtx_counts1);
         }
 
     public:
-        MCS(Graph & g0, Graph & g1, Params params)
-            : g0(g0), g1(g1), params(params)
+        MCS(Graph & linegraph0, Graph & linegraph1, const std::vector<Edge> & edges0,
+                const std::vector<Edge> & edges1,
+                const Graph & originalgraph0, const Graph & originalgraph1,
+                Params params)
+            : linegraph0(linegraph0), linegraph1(linegraph1), edges0(edges0),
+              edges1(edges1), originalgraph0(originalgraph0),
+              originalgraph1(originalgraph1), params(params)
         { }
 
         auto run() -> std::pair<vector<Assignment>, McsStats>
         {
             DomainStore domain_store;
 
-            for (int i=0; i<g0.n; i++)
+            for (int i=0; i<linegraph0.n; i++)
                 domain_store.left.push_back(i);
-            for (int i=0; i<g1.n; i++)
+            for (int i=0; i<linegraph1.n; i++)
                 domain_store.right.push_back(i);
 
-            domain_store.domains.push_back({0, 0, g0.n, g1.n});
+            domain_store.domains.push_back({0, 0, linegraph0.n, linegraph1.n});
 
             vector<Assignment> current;
 
+            // vtx_counts0 and vtx_counts1 have the following meaning, for the original pattern
+            // graph and original target graph respectively.  The vtx_counts array has n
+            // counters.  The i^th counter keeps track of the number of edges adjacent to
+            // vertex i of the original graph that are in the current solution.
+            //
+            // I'm relying on the claim---which I haven't yet properly proven---that we have
+            // a K3/claw problem if and only if the two vtx_counts arrays have different numbers
+            // of non-zero elements.  TODO: look again at the RASCAL paper, and see how they handle
+            // the K3/claw problem.
+
 	    if (params.mcsplit_down) {
-		for (unsigned int goal = std::min(g0.n, g1.n) ; goal > 0 ; --goal) {
+		for (unsigned int goal = std::min(linegraph0.n, linegraph1.n) ; goal > 0 ; --goal) {
 		    if (incumbent.size() == goal) break;
                     auto domain_store_copy = domain_store;
-                    search(current, domain_store_copy, goal);
+                    std::vector<int> vtx_counts0(originalgraph0.n);
+                    std::vector<int> vtx_counts1(originalgraph1.n);
+                    search(current, domain_store_copy, goal, vtx_counts0, vtx_counts1);
 		    if (incumbent.size() == goal || abort_due_to_timeout) break;
 		    if (!params.quiet) cout << "Upper bound: " << goal-1 << std::endl;
                     cout << stats.nodes << std::endl;
 		}
 	    } else {
-                search(current, domain_store, std::min(g0.n, g1.n));
+                std::vector<int> vtx_counts0(originalgraph0.n);
+                std::vector<int> vtx_counts1(originalgraph1.n);
+                search(current, domain_store, std::min(linegraph0.n, linegraph1.n), vtx_counts0, vtx_counts1);
 	    }
 
             return {incumbent, stats};
@@ -256,33 +320,41 @@ namespace {
     };
 };
 
-auto vertices_sorted_by_degree(Graph & g) -> vector<int>
-{
-    auto deg = calculate_degrees(g);
-    vector<int> vv(g.n);
-    std::iota(std::begin(vv), std::end(vv), 0);
-    std::stable_sort(std::begin(vv), std::end(vv), [&](int a, int b) {
-        return deg[a] > deg[b];
-    });
-    return vv;
-}
+//auto vertices_sorted_by_degree(Graph & linegraph) -> vector<int>
+//{
+//    auto deg = calculate_degrees(linegraph);
+//    vector<int> vv(linegraph.n);
+//    std::iota(std::begin(vv), std::end(vv), 0);
+//    std::stable_sort(std::begin(vv), std::end(vv), [&](int a, int b) {
+//        return deg[a] > deg[b];
+//    });
+//    return vv;
+//}
 
-auto solve_mcs(Graph & g0, Graph & g1, Params params)
+auto solve_mcs(Graph & linegraph0, Graph & linegraph1,
+                const std::vector<Edge> & edges0,
+                const std::vector<Edge> & edges1,
+                const Graph & originalgraph0,
+                const Graph & originalgraph1,
+                Params params)
 		-> std::pair<vector<Assignment>, McsStats>
 {
-    auto vv0 = vertices_sorted_by_degree(g0);
-    auto vv1 = vertices_sorted_by_degree(g1);
+//    auto vv0 = vertices_sorted_by_degree(linegraph0);
+//    auto vv1 = vertices_sorted_by_degree(linegraph1);
+//
+//    struct Graph linegraph0_sorted = induced_subgraph(linegraph0, vv0);
+//    struct Graph linegraph1_sorted = induced_subgraph(linegraph1, vv1);
 
-    struct Graph g0_sorted = induced_subgraph(g0, vv0);
-    struct Graph g1_sorted = induced_subgraph(g1, vv1);
+//    auto solution = MCS(linegraph0_sorted, linegraph1_sorted, params).run();
 
-    auto solution = MCS(g0_sorted, g1_sorted, params).run();
+    auto solution = MCS(linegraph0, linegraph1, edges0, edges1,
+            originalgraph0, originalgraph1, params).run();
 
-    // Convert to indices from original, unsorted graphs
-    for (auto& vtx_pair : solution.first) {
-        vtx_pair.v = vv0[vtx_pair.v];
-        vtx_pair.w = vv1[vtx_pair.w];
-    }
+//    // Convert to indices from original, unsorted graphs
+//    for (auto& vtx_pair : solution.first) {
+//        vtx_pair.v = vv0[vtx_pair.v];
+//        vtx_pair.w = vv1[vtx_pair.w];
+//    }
 
     return solution;
 }

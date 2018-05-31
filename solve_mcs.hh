@@ -41,5 +41,10 @@ struct McsStats
     long long time_of_last_incumbent_update = 0;
 };
 
-auto solve_mcs(Graph & g0, Graph & g1, Params params)
+auto solve_mcs(Graph & linegraph0, Graph & linegraph1,
+        const std::vector<Edge> & edges0,
+        const std::vector<Edge> & edges1,
+        const Graph & originalgraph0,
+        const Graph & originalgraph1,
+        Params params)
 		-> std::pair<std::vector<Assignment>, McsStats>;
