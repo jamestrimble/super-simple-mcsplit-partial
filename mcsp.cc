@@ -33,6 +33,7 @@ static struct argp_option options[] = {
     {"dimacs", 'd', 0, 0, "Read DIMACS format"},
     {"lad", 'l', 0, 0, "Read LAD format"},
     {"mcsplit-down", 'm', 0, 0, "Use the McSplit-down algorithm rather than branch and bound"},
+    {"connected", 'c', 0, 0, "Require the subgraphs to be connected"},
     {"timeout", 't', "timeout", 0, "Specify a timeout (seconds)"},
     { 0 }
 };
@@ -43,6 +44,7 @@ struct Arguments {
     bool dimacs;
     bool lad;
     bool mcsplit_down;
+    bool connected;
     Heuristic heuristic;
     char *filename1;
     char *filename2;
@@ -72,6 +74,9 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state) {
             break;
         case 'm':
             arguments.mcsplit_down = true;
+            break;
+        case 'c':
+            arguments.connected = true;
             break;
         case 't':
             arguments.timeout = std::stoi(arg);
@@ -208,6 +213,7 @@ int main(int argc, char** argv)
         arguments.quiet,
         arguments.verbose,
         arguments.mcsplit_down,
+        arguments.connected,
         arguments.heuristic,
         start
     };

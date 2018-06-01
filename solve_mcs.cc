@@ -79,7 +79,16 @@ namespace {
             return *std::min_element(arr.begin() + start_idx, arr.begin() + start_idx + len);
         }
 
-        auto select_bidomain(const DomainStore & domain_store, int current_matching_size) -> int
+        auto bd_is_adjacent(const Bidomain & bd, const std::vector<int> & vtx_counts0,
+                const DomainStore & domain_store) -> bool
+        {
+            int v = domain_store.left[bd.l];
+            Edge e = edges0[v];
+            return vtx_counts0[e.v] || vtx_counts0[e.w];
+        }
+
+        auto select_bidomain(const DomainStore & domain_store, int current_matching_size,
+                const std::vector<int> & vtx_counts0) -> int
         {
             // Select the bidomain with the smallest max(leftsize, rightsize), breaking
             // ties on the smallest vertex index in the left set
@@ -87,6 +96,10 @@ namespace {
             int best = -1;
             for (unsigned int i=0; i<domain_store.domains.size(); i++) {
                 const Bidomain &bd = domain_store.domains[i];
+                if (params.connected && current_matching_size > 0 &&
+                        !bd_is_adjacent(bd, vtx_counts0, domain_store)) {
+                    continue;
+                }
                 int len = params.heuristic == Heuristic::min_max ?
                         std::max(bd.left_len, bd.right_len) :
                         bd.left_len * bd.right_len;
@@ -221,7 +234,10 @@ namespace {
             if (bound <= incumbent.size() || (params.mcsplit_down && bound < matching_size_goal))
                 return Search::Done;
 
-            int bd_idx = select_bidomain(domain_store, current.size());
+            int bd_idx = select_bidomain(domain_store, current.size(), vtx_counts0);
+            if (bd_idx == -1)  // this might occur if params.connected is true
+                return Search::Done;
+
             Bidomain &bd = domain_store.domains[bd_idx];
 
             int v = find_min_value(domain_store.left, bd.l, bd.left_len);

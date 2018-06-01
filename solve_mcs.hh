@@ -14,6 +14,7 @@ struct Params
     bool quiet;
     bool verbose;
     bool mcsplit_down;
+    bool connected;
     Heuristic heuristic;
     std::chrono::time_point<std::chrono::steady_clock> start_time;
 };
