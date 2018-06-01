@@ -118,25 +118,6 @@ unsigned long long nodes{ 0 };
 /*******************************************************************************
 *******************************************************************************/
 
-bool check_sol(const Graph & g0, const Graph & g1 , const vector<Assignment> & solution) {
-    return true;
-    vector<bool> used_left(g0.n, false);
-    vector<bool> used_right(g1.n, false);
-    for (unsigned int i=0; i<solution.size(); i++) {
-        struct Assignment p0 = solution[i];
-        if (used_left[p0.v] || used_right[p0.w])
-            return false;
-        used_left[p0.v] = true;
-        used_right[p0.w] = true;
-        for (unsigned int j=i+1; j<solution.size(); j++) {
-            struct Assignment p1 = solution[j];
-            if (g0.adjmat[p0.v][p1.v] != g1.adjmat[p0.w][p1.w])
-                return false;
-        }
-    }
-    return true;
-}
-
 vector<Edge> get_edges(const Graph & g)
 {
     vector<Edge> edges;
@@ -172,6 +153,98 @@ Graph make_linegraph(const Graph & g, const vector<Edge> & edges)
     }
 
     return linegraph;
+}
+
+struct EdgeEdgeMapping
+{
+    Edge edge0;
+    Edge edge1;
+};
+
+bool check_sol(const Graph & g0, const Graph & g1,
+        const vector<EdgeEdgeMapping> & edge_edge_mappings)
+{
+    std::vector<int> vtx_vtx_mappings(g0.n, -1);
+
+    for (EdgeEdgeMapping eem : edge_edge_mappings) {
+        int v0 = eem.edge0.v;
+        int w0 = eem.edge0.w;
+        int v1 = eem.edge1.v;
+        int w1 = eem.edge1.w;
+        if (vtx_vtx_mappings[v0] == -1) {
+            vtx_vtx_mappings[v0] = v1;
+        } else if (vtx_vtx_mappings[v0] != v1) {
+            return false;
+        }
+        if (vtx_vtx_mappings[w0] == -1) {
+            vtx_vtx_mappings[w0] = w1;
+        } else if (vtx_vtx_mappings[w0] != w1) {
+            return false;
+        }
+        if (!g0.adjmat[v0][w0])
+            return false;
+        if (!g1.adjmat[v1][w1])
+            return false;
+    }
+    return true;
+}
+
+auto get_edge_edge_mappings(
+        const std::vector<Assignment> & solution,
+        const std::vector<Edge> & edges0,
+        const std::vector<Edge> & edges1,
+        const Graph & g0) -> vector<EdgeEdgeMapping>
+{
+    // Keep track of the vertices in the pattern graph that must
+    // be mapped to specific vertices in the target graph
+    std::vector<int> vtx_vtx_mappings(g0.n, -1);
+
+    std::vector<EdgeEdgeMapping> edge_edge_mappings;
+    for (Assignment a : solution) {
+        edge_edge_mappings.push_back({edges0[a.v], edges1[a.w]});
+    }
+
+    // Look at each pair of edge mappings.  If the pattern-graph
+    // edges have an endpoint in common, then that vertex must be mapped
+    // to the vertex that is an endpoint of both the target-graph edges.
+    for (unsigned i=0; i<edge_edge_mappings.size(); i++) {
+        Edge edge0i = edge_edge_mappings[i].edge0;
+        Edge edge1i = edge_edge_mappings[i].edge1;
+        for (unsigned j=i+1; j<edge_edge_mappings.size(); j++) {
+            Edge edge0j = edge_edge_mappings[j].edge0;
+            Edge edge1j = edge_edge_mappings[j].edge1;
+
+            // TODO: refactor this.  Maybe factor out a function?
+            int common_pattern_graph_vtx = -1;
+            if (edge0i.v == edge0j.v || edge0i.v == edge0j.w) {
+                common_pattern_graph_vtx = edge0i.v;
+            } else if (edge0i.w == edge0j.v || edge0i.w == edge0j.w) {
+                common_pattern_graph_vtx = edge0i.w;
+            }
+            if (common_pattern_graph_vtx != -1) {
+                if (edge1i.v == edge1j.v || edge1i.v == edge1j.w) {
+                    vtx_vtx_mappings[common_pattern_graph_vtx] = edge1i.v;
+                } else {
+                    vtx_vtx_mappings[common_pattern_graph_vtx] = edge1i.w;
+                }
+            }
+        }
+    }
+    // Orient the edges
+    for (EdgeEdgeMapping & eem : edge_edge_mappings) {
+        int u = vtx_vtx_mappings[eem.edge0.v];
+        if (u != -1) {
+            if (eem.edge1.v != u) {
+                std::swap(eem.edge1.v, eem.edge1.w);
+            }
+        } else {
+            int u = vtx_vtx_mappings[eem.edge0.w];
+            if (u != -1 && eem.edge1.w != u) {
+                std::swap(eem.edge1.v, eem.edge1.w);
+            }
+        }
+    }
+    return edge_edge_mappings;
 }
 
 int main(int argc, char** argv)
@@ -234,7 +307,6 @@ int main(int argc, char** argv)
 
     auto stop = std::chrono::steady_clock::now();
     auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count();
-
     /* Clean up the timeout thread */
     if (timeout_thread.joinable()) {
         {
@@ -245,9 +317,17 @@ int main(int argc, char** argv)
         timeout_thread.join();
     }
 
-//    if (!check_sol(g0, g1, solution))
-//        fail("*** Error: Invalid solution\n");
-    printf("TODO: write a solution checker\n");
+    auto edge_edge_mappings = get_edge_edge_mappings(solution, edges0, edges1, g0);
+
+    if (!check_sol(g0, g1, edge_edge_mappings))
+        fail("*** Error: Invalid solution\n");
+
+    for (auto m : edge_edge_mappings) {
+        cout << "(" <<
+        m.edge0.v << "," << m.edge0.w << " -> " <<
+        m.edge1.v << "," << m.edge1.w << ") ";
+    }
+    cout << std::endl;
 
     cout << "Solution size " << solution.size() << std::endl;
 //    for (int i=0; i<g0.n; i++)
